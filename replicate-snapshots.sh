@@ -28,7 +28,7 @@ BOOKMARK_PREFIX="bk-auto"
 
 
 # Force a new FULL after N incrementals per dataset (0 = never force)
-ROTATE_FULL_AFTER=20
+ROTATE_FULL_AFTER=2
 
 
 
@@ -85,7 +85,11 @@ send_full() {
   #<modified_dataset_name>__<snapshot_name>__FULL.zfs
   local stream_name="${ds//\//_}__${snap#*@}__FULL.zfs"
   local rpath="${REMOTE}:${stream_name}"
+  local previous_files=$(mktemp)
   log "FULL send: $snap  →  $rpath"
+  rclone lsf --include "${ds//\//_}*" "${REMOTE}:" > "$previous_files"
+ 
+  log "Deleting $(wc -l $previous_files) from remote AFTER FULL snapshot upload"
 
   # create a bookmark tied to this snap so future incrementals can e based on it
   zfs bookmark "$snap" "${ds}#bk-${snap#*@}" || true
@@ -98,6 +102,11 @@ send_full() {
 
   # reset incremental counter
   reset_increment_count $ds
+  # deleting old files
+  while IFS= read -r file; do
+	  log "Deleting ${file} from remote"
+	  rclone delete "${REMOTE}:${file}" 
+  done < "$previous_files"
 }
 
 send_incremental() {
