@@ -86,6 +86,8 @@ send_full() {
   local stream_name="${ds//\//_}__${snap#*@}__FULL.zfs"
   local rpath="${REMOTE}:${stream_name}"
   local previous_files=$(mktemp)
+  local checksum_file=$(mktemp)
+  local checksum_remote_file=$(mktemp)
   log "FULL send: $snap  →  $rpath"
   rclone lsf --include "${ds//\//_}*" "${REMOTE}:" > "$previous_files"
  
@@ -96,9 +98,17 @@ send_full() {
   # zfs send
 
   zfs send $ZFS_FLAGS "$snap" \
+	  | tee >(zstreamdump > $checksum_file) \
 	  | mbuffer -q -s 128k -m "$MBUF_SIZE" -W "$MBUF_WATERMARK" \
 	  | rclone rcat $RCLONE_FLAGS --progress "$rpath"
-  # Advance bookmark so we can prune old snapshots
+
+  checksum_diff=$(diff $checksum_file $checksum_remote_file)
+  # Check if diff found any differences
+  if [ $? -ne 0 ]; then
+    die "checksum incorrect (corrupt file?)$checksum_diff"
+  else
+    log "Checksums verification succeeded!"
+  fi
 
   # reset incremental counter
   reset_increment_count $ds
@@ -107,7 +117,10 @@ send_full() {
 	  log "Deleting ${file} from remote"
 	  rclone delete "${REMOTE}:${file}" 
   done < "$previous_files"
-}
+
+  rclone cat "$rpath"|zstreamdump > $checksum_remote_file
+  
+  }
 
 send_incremental() {
   local ds="$1" from_bk="$2" to_snap="$3"
@@ -116,11 +129,13 @@ send_incremental() {
   local ts="${to_snap#*@}"
   local stream_name="${ds//\//_}__${base}__to__${ts}__INC.zfs"
   local rpath="${REMOTE}:${stream_name}"
+  local checksum_file=$(mktemp)
 
   log "INCR send: $from_bk → $to_snap  →  $rpath"
   zfs send $ZFS_FLAGS -i "$from_bk" "$to_snap" \
+	  | tee >(zstreamdump > $checksum_file) \
 	  | mbuffer -q -s 128k -m "$MBUF_SIZE" -W "$MBUF_WATERMARK" \
-	  | rclone rcat $RCLONE_FLAGS --progress "$rpath"
+	  | rclone rcat $RCLONE_FLAGS --progress "$rpath" \
   # Advance bookmark so we can prune old snapshots
   zfs bookmark "$to_snap" "${ds}#bk-${ts}" || true
 
