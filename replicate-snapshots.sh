@@ -14,8 +14,8 @@ REMOTE="crypt-storage-box-1"
 
 
 # Add --raw for encrypted datasets (preserves encryption);
-
-RCLONE_FLAGS="--compressed --checkers= --ftp-concurrency=10"
+ZFS_FLAGS="--compressed"
+RCLONE_FLAGS="--checkers=7 --ftp-concurrency=10"
 
 # mbuffer tuning
 MBUF_SIZE="256M"
@@ -91,9 +91,9 @@ send_full() {
   zfs bookmark "$snap" "${ds}#bk-${snap#*@}" || true
   # zfs send
 
-  zfs send $RCLONE_FLAGS "$snap" \
+  zfs send $ZFS_FLAGS "$snap" \
 	  | mbuffer -q -s 128k -m "$MBUF_SIZE" -W "$MBUF_WATERMARK" \
-	  | rclone rcat --progress "$rpath"
+	  | rclone rcat $RCLONE_FLAGS --progress "$rpath"
   # Advance bookmark so we can prune old snapshots
 
   # reset incremental counter
@@ -109,9 +109,9 @@ send_incremental() {
   local rpath="${REMOTE}:${stream_name}"
 
   log "INCR send: $from_bk → $to_snap  →  $rpath"
-  zfs send $RCLONE_FLAGS -i "$from_bk" "$to_snap" \
+  zfs send $ZFS_FLAGS -i "$from_bk" "$to_snap" \
 	  | mbuffer -q -s 128k -m "$MBUF_SIZE" -W "$MBUF_WATERMARK" \
-	  | rclone rcat --progress "$rpath"
+	  | rclone rcat $RCLONE_FLAGS --progress "$rpath"
   # Advance bookmark so we can prune old snapshots
   zfs bookmark "$to_snap" "${ds}#bk-${ts}" || true
 
