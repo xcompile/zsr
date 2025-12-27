@@ -28,7 +28,7 @@ BOOKMARK_PREFIX="bk-auto"
 
 
 # Force a new FULL after N incrementals per dataset (0 = never force)
-ROTATE_FULL_AFTER=2
+ROTATE_FULL_AFTER=20
 
 
 
@@ -98,27 +98,25 @@ send_full() {
   # zfs send
 
   zfs send $ZFS_FLAGS "$snap" \
-	  | tee >(zstreamdump > $checksum_file) \
 	  | mbuffer -q -s 128k -m "$MBUF_SIZE" -W "$MBUF_WATERMARK" \
 	  | rclone rcat $RCLONE_FLAGS --progress "$rpath"
 
-  checksum_diff=$(diff $checksum_file $checksum_remote_file)
+  #checksum_diff=$(diff $checksum_file $checksum_remote_file)
   # Check if diff found any differences
-  if [ $? -ne 0 ]; then
-    die "checksum incorrect (corrupt file?)$checksum_diff"
-  else
-    log "Checksums verification succeeded!"
-  fi
+  #if [ $? -ne 0 ]; then
+  #  die "checksum incorrect (corrupt file?)$checksum_diff"
+  #else
+  #  log "Checksums verification succeeded!"
+  #fi
 
   # reset incremental counter
   reset_increment_count $ds
   # deleting old files
   while IFS= read -r file; do
-	  log "Deleting ${file} from remote"
-	  rclone delete "${REMOTE}:${file}" 
+  	  log "Deleting ${file} from remote"
+  	  rclone delete "${REMOTE}:${file}" 
   done < "$previous_files"
 
-  rclone cat "$rpath"|zstreamdump > $checksum_remote_file
   
   }
 
@@ -133,9 +131,8 @@ send_incremental() {
 
   log "INCR send: $from_bk → $to_snap  →  $rpath"
   zfs send $ZFS_FLAGS -i "$from_bk" "$to_snap" \
-	  | tee >(zstreamdump > $checksum_file) \
 	  | mbuffer -q -s 128k -m "$MBUF_SIZE" -W "$MBUF_WATERMARK" \
-	  | rclone rcat $RCLONE_FLAGS --progress "$rpath" \
+	  | rclone rcat $RCLONE_FLAGS --progress "$rpath" 
   # Advance bookmark so we can prune old snapshots
   zfs bookmark "$to_snap" "${ds}#bk-${ts}" || true
 
@@ -176,7 +173,7 @@ prune_local_bookmarks() {
 }
 
 require_cmds() {
-  for c in zfs zpool mbuffer rclone awk sed grep; do
+  for c in zfs zpool mbuffer rclone awk sed grep mktemp; do
     command -v "$c" >/dev/null 2>&1 || die "Missing command: $c"
   done
 }
