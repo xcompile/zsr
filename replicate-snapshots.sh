@@ -29,13 +29,13 @@ BOOKMARK_PREFIX="bk-auto"
 
 # Force a new FULL after N incrementals per dataset (0 = never force)
 ROTATE_FULL_AFTER=20
+LOCK_FILE_PREFIX="/tmp/rs.lock"
 
 
 
 # ========= INTERNALS =========
 log() { printf '[%(%F %T)T] %s\n' -1 "$*" >&2; }
 die() { log "ERROR: $*"; exit 1; }
-
 
 list_children() {
   # Lists immediate children that match the GLOB
@@ -173,7 +173,7 @@ prune_local_bookmarks() {
 }
 
 require_cmds() {
-  for c in zfs zpool mbuffer rclone awk sed grep mktemp; do
+  for c in zfs zpool mbuffer rclone awk sed grep mktemp trap; do
     command -v "$c" >/dev/null 2>&1 || die "Missing command: $c"
   done
 }
@@ -194,6 +194,15 @@ main() {
 	
 	local ds
 	for ds in $(list_children); do
+	  local backup_lock="${LOCK_FILE_PREFIX}.${ds}"
+	  # lock specific backup process (very long running full backups should not block others)
+	  if [ -f $backup_lock ];then
+	    continue
+	  else
+	    echo $$ > "${backup_lock}"
+	    trap "rm -f -- '$backup_lock'" EXIT
+	  fi
+
 	 
 	  # check if processing is limited to a specific dataset	
 	  if [[ -n "$FILTER_DS" ]]; then
@@ -232,7 +241,10 @@ main() {
 	  # prune older bookmarks, keep the last one
 	  prune_local_bookmarks "$ds"
 
-	  #
+	  # still need to delete the lock, just in case a few backups runing fast and the last one taking a long time
+	  # the trap command would only be executed once the script finished the entire process
+	  # could fork them out alternatively
+	  rm -f -- $backup_log || true
 
 	done
 }
