@@ -179,6 +179,7 @@ require_cmds() {
 }
 
 
+# deprecated
 do_snapshot_all() {
   local ds
   for ds in $(list_children); do
@@ -188,15 +189,23 @@ do_snapshot_all() {
   done
 }
 
+do_snapshot() {
+  local ds="${1}"
+  local snap="${ds}@${SNAPSHOT_PREFIX}-${TS}"
+  log "Create snapshot: $snap"
+  zfs snapshot -r "$snap"
+}
+
 main() {
 	require_cmds
-	do_snapshot_all
+	#do_snapshot_all
 	
 	local ds
 	for ds in $(list_children); do
 	  local backup_lock="${LOCK_FILE_PREFIX}.${ds}"
 	  # lock specific backup process (very long running full backups should not block others)
 	  if [ -f $backup_lock ];then
+	    log "skip ${ds} due to existing lock ${backup_lock}"
 	    continue
 	  else
 	    echo $$ > "${backup_lock}"
@@ -207,11 +216,15 @@ main() {
 	  # check if processing is limited to a specific dataset	
 	  if [[ -n "$FILTER_DS" ]]; then
 	    if [[ $ds != $FILTER_DS ]]; then
-	      log "Skip DS:${ds}"
+	      log "Skip ${ds} due to limitation to ${FILTER_DS}"
               continue
 	    fi
 
 	  fi
+
+	  # create snapshot
+          do_snapshot $d
+
 	  log "Process DS: ${ds}"
 	  # determine newest snapshot we just made
 	  local last_snap
