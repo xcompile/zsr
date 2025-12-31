@@ -202,7 +202,7 @@ main() {
 	
 	local ds
 	for ds in $(list_children); do
-	  local backup_lock="${LOCK_FILE_PREFIX}.${ds}"
+	  local backup_lock="${LOCK_FILE_PREFIX}${ds//\//_}."
 	  # lock specific backup process (very long running full backups should not block others)
 	  if [ -f $backup_lock ];then
 	    log "skip ${ds} due to existing lock ${backup_lock}"
@@ -223,7 +223,7 @@ main() {
 	  fi
 
 	  # create snapshot
-          do_snapshot $d
+          do_snapshot $ds
 
 	  log "Process DS: ${ds}"
 	  # determine newest snapshot we just made
@@ -257,7 +257,7 @@ main() {
 	  # still need to delete the lock, just in case a few backups runing fast and the last one taking a long time
 	  # the trap command would only be executed once the script finished the entire process
 	  # could fork them out alternatively
-	  rm -f -- $backup_log || true
+	  rm -f -- $backup_lock || true
 
 	done
 }
