@@ -111,6 +111,12 @@ send_full() {
 
   # reset incremental counter
   reset_increment_count $ds
+
+
+  # record transfer has succeeded
+  log "transfer succeeded"
+  transfer_log_record $ds $to_snap
+
   # deleting old files
   while IFS= read -r file; do
   	  log "Deleting ${file} from remote"
@@ -136,6 +142,9 @@ send_incremental() {
   # Advance bookmark so we can prune old snapshots
   zfs bookmark "$to_snap" "${ds}#bk-${ts}" || true
 
+  # record transfer has succeeded
+  log "transfer succeeded"
+  transfer_log_record $ds $to_snap
   # prune older auto snapshots
   prune_local_snaps "$ds" 7
 
@@ -172,8 +181,24 @@ prune_local_bookmarks() {
         | xargs -r -n1 zfs destroy || true
 }
 
+transfer_log_record() {
+  local ds="$1"
+  local line="$2"
+
+  local rpath="${REMOTE}:tlog-${ds//\//_}.log"
+  echo "${line}"|rclone rcat $RCLONE_FLAGS --progress "$rpath" 
+}
+
+transfer_log_last() {
+  local ds="$1"
+
+  local rpath="${REMOTE}:tlog-${ds//\//_}.log"
+  rclone cat $RCLONE_FLAGS  "$rpath"|tail -n1
+}
+
+
 require_cmds() {
-  for c in zfs zpool mbuffer rclone awk sed grep mktemp trap; do
+  for c in zfs zpool mbuffer rclone awk sed grep mktemp trap tail; do
     command -v "$c" >/dev/null 2>&1 || die "Missing command: $c"
   done
 }
@@ -202,7 +227,7 @@ main() {
 	
 	local ds
 	for ds in $(list_children); do
-	  local backup_lock="${LOCK_FILE_PREFIX}${ds//\//_}."
+	  local backup_lock="${LOCK_FILE_PREFIX}${ds//\//_}.lock"
 	  # lock specific backup process (very long running full backups should not block others)
 	  if [ -f $backup_lock ];then
 	    log "skip ${ds} due to existing lock ${backup_lock}"
@@ -223,17 +248,29 @@ main() {
 	  fi
 
 	  # create snapshot
-          do_snapshot $ds
+          local last_bk incr_count last_snap
+	  last_bk=$(last_bookmark "$ds")
+	  last_snap=$(last_snapshot "$ds")
+
+	  local last_tlog
+
+	  # last transfer log contains the snapshot transferred in the last run
+	  # this enforces all snapshots are transferred in order, even the previous transfer failed due to any reason
+	  last_tlog=$(transfer_log_last "$ds")
+	  if [ $last_tlog == $last_snap ];then
+		  log "OK,last transfer log: ${last_tlog}"
+		  do_snapshot $ds
+		  last_snap=$(last_snapshot "$ds")
+		  log "Created new Snapshot ${last_snap}"
+	  else
+		  log "last transfer has failed, since snapshot seems not existing on remote last snap:${last_snap}, transfer log:${last_tlog}. Trying to reupload."
+	  fi
+
 
 	  log "Process DS: ${ds}"
 	  # determine newest snapshot we just made
-	  local last_snap
-	  last_snap=$(last_snapshot "$ds")
 	  [[ -n "$last_snap" ]] || { log "No snapshot found for $ds"; continue; }
 
-          local last_bk incr_count
-	  last_bk=$(last_bookmark "$ds")
-	  incr_count=$(get_increment_count "$ds")
 	  if [[ -z "$last_bk" ]]; then
             # No baseline yet => FULL backup
 	    send_full "$ds" "$last_snap"
@@ -241,6 +278,7 @@ main() {
 	  fi
 
 	  # rotation policy: force new full after N increments
+	  incr_count=$(get_increment_count "$ds")
 	  if (( ROTATE_FULL_AFTER > 0 && incr_count >= ROTATE_FULL_AFTER )); then
             log "Rotate policy reached for $ds (incrementals=$incr_count) → new FULL"
 	    send_full "$ds" "$last_snap"
