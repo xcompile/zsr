@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 #set -x
+PATH="${PATH}:/usr/sbin"
 
 # ========= USER SETTINGS =========
 FILTER_DS="${1:-}"
